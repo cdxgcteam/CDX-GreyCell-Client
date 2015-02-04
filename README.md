@@ -9,7 +9,7 @@ Currently tested under windows 8, w/ Pika 0.9.14<br>
 Proposed Comms Protocol:<br>
 JSON Based, restricted to strings, integers and floats<br>
 1. ClientID: String (School-HostName)<br>
-2. AgeOff: String (YYYYMMDD-HHMMSSZ)<br>
+2. AgeOff: String (YYYYMMDDZHHMMSS)<br>
 3. CommandID: Integer Associated with command module<br>
 4. TaskID: Integer defined by module<br>
 5. CommandData: Key Value array, defined by module<br>
