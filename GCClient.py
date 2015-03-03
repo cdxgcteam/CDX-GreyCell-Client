@@ -1,4 +1,5 @@
 import GCClient_Comms
+import GC_CModule
 import ConfigParser
 import socket
 import os
@@ -6,46 +7,173 @@ import sys
 import platform
 import json
 import hashlib
+from datetime import datetime
+import GC_Utility
+import threading
+import imp
+import inspect
+
+instance = None
+GC_AMQP_HOST = 'AMQP_HOST'
+GC_USERID = 'USERID'
+GC_PASSWORD = 'PASSWORD'
+GC_RESP_EXCHANGE = 'RESP_EXCHANGE'
+GC_RESP_KEY = 'RESP_KEY'
+GC_TASK_EXCHANGE = 'TASK_EXCHANGE'
+GC_TASK_KEY = 'TASK_KEY'
+GC_SCHOOLNAME = 'SCHOOLNAME'
+GC_CLIENTID = 'CLIENTID'
+GC_CONFIG_CATEGORY = 'DEFAULT'
+GC_ALL_TASKS = 'all.tasks'
+GC_TASK_ROUTINGKEY = '.tasks'
+
+GC_ENABLE_COMMS = True
+GC_PRINT_DEBUG = True
+GC_SEND_DEBUG = True
 
 class GCClient(object):
+
+	gc_modules = {}
+	gc_threads = []
+	_instance = None
+	
 	def __init__(self):
 		self.readConfig()
+		self.loadModules()
 		
-		self.uuid = self.school_name + "_" + socket.gethostname()
-		#self.comms = GCClient_Comms.GCClient_Comms(gc_host = self.gc_host, userid = self.userid, password = self.password)
+		GC_Utility.print_dict(self.generate_diagnostics())
 		
-		#self.comms.publish(exchange_name = self.resp_exchange, routing_key=self.resp_key, message = json.dumps({'ClientID': self.uuid}, sort_keys=True))
-		#self.comms.monitor(exchange_name = self.task_exchange, routing_key=self.task_key, callback = self.logging_callback)
-		
-		self.print_dict(self.generate_diagnostics())
-		#loadModules();
-		#start();
-		
+		if GC_ENABLE_COMMS:
+			# Initialize Comms Module
+			self.comms = GCClient_Comms.GCClient_Comms(gc_host = self.gc_host, userid = self.userid, password = self.password)
+
+			# Start Listening to exchanges
+			t = threading.Thread(name=GC_ALL_TASKS, target=self.comms.monitor, args=(self.task_exchange, GC_ALL_TASKS, self.logging_callback))
+			t.start()
+			gc_threads.append(t)
+			
+			t = threading.Thread(name=self.school_name, target=self.comms.monitor, args=(self.task_exchange, self.school_name + GC_TASK_ROUTINGKEY, self.logging_callback))
+			t.start()
+			gc_threads.append(t)
+			
+			t = threading.Thread(name=self.uuid, target=self.comms.monitor, args=(self.task_exchange, self.uuid + GC_TASK_ROUTINGKEY, self.logging_callback))
+			t.start()
+			gc_threads.append(t)
+
 	def readConfig(self):
 		config = ConfigParser.ConfigParser()
 		config.readfp(open('gcclient.ini'))
-		self.gc_host = config.get('DEFAULT', 'AMQP_HOST')
-		self.userid = config.get('DEFAULT', 'USERID')
-		self.password = config.get('DEFAULT', 'PASSWORD')
-		self.resp_exchange = config.get('DEFAULT', 'RESP_EXCHANGE')
-		self.resp_key = config.get('DEFAULT', 'RESP_KEY')
-		self.task_exchange = config.get('DEFAULT', 'TASK_EXCHANGE')
-		self.task_key = config.get('DEFAULT', 'TASK_KEY')
-		self.school_name = config.get('DEFAULT', 'SCHOOLNAME')
-	
-	def logging_callback(self, ch, method, properties, body):
-		print " [x] %r:%r" % (method.routing_key, body,)
-	
-	#def loadModules(self):
+		self.gc_host = config.get(GC_CONFIG_CATEGORY, GC_AMQP_HOST)
+		self.userid = config.get(GC_CONFIG_CATEGORY, GC_USERID)
+		self.password = config.get(GC_CONFIG_CATEGORY, GC_PASSWORD)
+		self.resp_exchange = config.get(GC_CONFIG_CATEGORY, GC_RESP_EXCHANGE)
+		self.resp_key = config.get(GC_CONFIG_CATEGORY, GC_RESP_KEY)
+		self.task_exchange = config.get(GC_CONFIG_CATEGORY, GC_TASK_EXCHANGE)
+		self.task_key = config.get(GC_CONFIG_CATEGORY, GC_TASK_KEY)
+		self.school_name = config.get(GC_CONFIG_CATEGORY, GC_SCHOOLNAME)
 		
+		if (config.has_option(GC_CONFIG_CATEGORY, GC_CLIENTID)):
+			self.clientid = config.get(GC_CONFIG_CATEGORY, GC_CLIENTID)
+		else:
+			self.clientid = socket.gethostname()
+		
+		self.uuid = self.school_name + "_" + self.clientid
 	
-	#def start(self):
+	def loadModules(self):
+		# Add built in functions to the gc_modules dictionary`
+		self.gc_modules[GC_Utility.GC_MOD_DIAG] = self.run_diag
+		self.gc_modules[GC_Utility.GC_MOD_QUIT] = self.quit
+		
+		# Walk the current directory and load any file GC_CModule_*.py
+		for file in os.listdir("."):
+			(path, name) = os.path.split(file)
+			(name, ext) = os.path.splitext(name)
+			
+			# Check that this is a file with a name GC_CModule_*.py
+			if os.path.isfile(file) and name.startswith('GC_CModule_') and ext == '.py':
+				
+				# Load the module
+				(f, filename, data) = imp.find_module(name, [path])
+				module = imp.load_module(name, f, filename, data)
+				
+				# Check module for a GC_CModule class
+				for name in dir(module):
+					obj = getattr(module, name)
+					
+					# Check module for a GC_CModule subclass, and not GC_CModule
+					if name != 'GC_CModule' and inspect.isclass(obj) and issubclass(obj, GC_CModule.GC_CModule):
+						# Load the module, and add it to the gc_modules dictionary
+						self.log(GC_Utility.DEBUG, "Loading GC_CModule: " + obj.__name__)
+						m = obj(self)
+						self.gc_modules[m.getModuleId()] = m
+						self.log(GC_Utility.INFO, "Loaded Module: " + m.getModuleId())
+
+	def quit(self) :
+		# Shutting down modules
+		for name in self.gc_modules:
+			m = self.gc_modules[name]
+			if not inspect.ismethod(m):
+				self.log(GC_Utility.INFO, "Shutting down " + m.getModuleId())
+				m.quit()
+		
+		# Turn off AMQP
+		#if GC_ENABLE_COMMS:
+		#	self.comms.quit()
+
+	def logging_callback(self, ch, method, properties, body):
+		if GC_ENABLE_COMMS:
+			self.log(GC_Utility.DEBUG, "Received Msg on " + method.routing_key)
+		
+		# 2. TaskCreateDT: String (YYYYMMDDZHHMMSS.SSS) <withheld><br>
+		# 3. ModuleID: Integer Associated with command module<br>
+		# 4. TaskRef: Integer defined by module<br>
+		# 5. CommandData: Key Value array, defined by module<br>
+		rcvd_task = json.loads(body)
+		rcvd_task[GC_Utility.GC_CLIENTID] = self.uuid
+		
+		GC_Utility.print_dict(rcvd_task[GC_Utility.GC_CMD_DATA])
+		
+		rcvd_task[GC_Utility.GC_RECEIVE_TIME] = GC_Utility.currentZuluDT()
+		
+		# Figure out which module... key/value pair on moduleid with objects....
+		if rcvd_task[GC_Utility.GC_MODULEID] in self.gc_modules:
+			self.gc_modules[rcvd_task[GC_Utility.GC_MODULEID]].handleTask(rcvd_task)
+		else:
+			self.log(GC_Utility.INFO, rcvd_task[GC_Utility.GC_MODULEID] + " not found in ")
+			self.log(GC_Utility.DEBUG, self.gc_modules.keys())
+
+	def sendResult(self, taskObj, respData):
+		# 2. ModuleID: Integer Associated with command module<br>
+		# 3. TaskRef: Integer defined by module<br>
+		# 4. RecieveTime: String (YYYYMMDDZHHMMSS.SSS) <br>
+		# 5. CompleteTime: String (YYYYMMDDZHHMMSS.SSS) <br>
+		# 6. ResponseData: Key Value array, defined by module<br>
+		
+		taskObj[GC_Utility.GC_COMPLETE_TIME] = GC_Utility.currentZuluDT()
+		taskObj[GC_Utility.GC_RESP_DATA] = respData
+		del taskObj[GC_Utility.GC_CMD_DATA]
+		GC_Utility.print_dict(taskObj)
+		
+		if GC_ENABLE_COMMS:
+			self.comms.publish(exchange_name = self.resp_exchange, routing_key=self.resp_key, message = json.dumps(taskObj))
+
+	def log(self, log_level, msg):
+		if (log_level == GC_Utility.DEBUG):
+			print "[DEBUG] " + msg 
+		else:
+			print "[INFO] " + msg
+			
+	def run_diag(gcclient, taskObj):
+		if (taskObj[GC_Utility.GC_MODULEID] == GC_Utility.GC_MOD_DIAG) :
+			GCClient.getInstance().sendResponse(taskObj = taskObj, respData = generate_diagnostics)
+		else:
+			raise Exception('Invalid ModuleID')
+
 	def generate_diagnostics(self):
 		diag_msg = {}
 		diag_msg['OS'] = platform.platform() + " / " + platform.machine() + " - " + platform.processor()
 		diag_msg['PythonVer'] = platform.python_version()
 		diag_msg['uname'] = platform.uname()
-		diag_msg['ClientID'] = self.uuid
 		file_list = {}
 		for file in os.listdir("."):
 			if os.path.isfile(file):
@@ -53,10 +181,21 @@ class GCClient(object):
 		
 		diag_msg['Files'] = file_list
 		return diag_msg
-		
-	def print_dict(self, dict):
-		 for k, v in dict.iteritems():
-			print k, ": ", v
-			
 
-gcclient = GCClient()
+GC_ENABLE_COMMS = False
+instance = GCClient()
+
+taskObj = {}
+command = {}
+
+command['cmd'] = 'execute_url'
+command['url'] = 'https://www.cnn.com'
+command['timer'] = 2
+taskObj['TaskId'] = 'ABC123'
+taskObj['routingKey'] = 'GREYUNI.GREYTEST'
+taskObj[GC_Utility.GC_CMD_DATA] = command
+taskObj[GC_Utility.GC_MODULEID] = 'selenium'
+taskObj[GC_Utility.GC_TASKREF] = 'Ref123'
+
+instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
+instance.quit()
