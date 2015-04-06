@@ -1,6 +1,6 @@
 
 class GC_CModule(object):
-	def __init__(self, gccommand):
+	def __init__(self, gcclient):
 		raise NotImplementedError
 
 	def handleTask(self, gccommand) :

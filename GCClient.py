@@ -8,10 +8,12 @@ import platform
 import json
 import hashlib
 from datetime import datetime
+from datetime import timedelta
 import GC_Utility
 import threading
 import imp
 import inspect
+import subprocess
 
 instance = None
 GC_AMQP_HOST = 'AMQP_HOST'
@@ -19,6 +21,7 @@ GC_USERID = 'USERID'
 GC_PASSWORD = 'PASSWORD'
 GC_RESP_EXCHANGE = 'RESP_EXCHANGE'
 GC_RESP_KEY = 'RESP_KEY'
+GC_LOG_EXCHANGE = 'LOG_EXCHANGE'
 GC_TASK_EXCHANGE = 'TASK_EXCHANGE'
 GC_TASK_KEY = 'TASK_KEY'
 GC_SCHOOLNAME = 'SCHOOLNAME'
@@ -27,38 +30,41 @@ GC_CONFIG_CATEGORY = 'DEFAULT'
 GC_ALL_TASKS = 'all.tasks'
 GC_TASK_ROUTINGKEY = '.tasks'
 
-GC_ENABLE_COMMS = True
-GC_PRINT_DEBUG = True
-GC_SEND_DEBUG = True
 
 class GCClient(object):
-
+	ENABLE_COMMS = True
+	PRINT_DEBUG = False
+	SEND_DEBUG = False
 	gc_modules = {}
 	gc_threads = []
-	_instance = None
 	
-	def __init__(self):
+	def __init__(self, debug = False, enable_comms = True):
+		self.PRINT_DEBUG = debug
+		
+		self.ENABLE_COMMS = enable_comms
+		
 		self.readConfig()
-		self.loadModules()
 		
 		GC_Utility.print_dict(self.generate_diagnostics())
 		
-		if GC_ENABLE_COMMS:
+		if self.ENABLE_COMMS:
 			# Initialize Comms Module
 			self.comms = GCClient_Comms.GCClient_Comms(gc_host = self.gc_host, userid = self.userid, password = self.password)
 
 			# Start Listening to exchanges
 			t = threading.Thread(name=GC_ALL_TASKS, target=self.comms.monitor, args=(self.task_exchange, GC_ALL_TASKS, self.logging_callback))
 			t.start()
-			gc_threads.append(t)
+			self.gc_threads.append(t)
 			
 			t = threading.Thread(name=self.school_name, target=self.comms.monitor, args=(self.task_exchange, self.school_name + GC_TASK_ROUTINGKEY, self.logging_callback))
 			t.start()
-			gc_threads.append(t)
+			self.gc_threads.append(t)
 			
 			t = threading.Thread(name=self.uuid, target=self.comms.monitor, args=(self.task_exchange, self.uuid + GC_TASK_ROUTINGKEY, self.logging_callback))
 			t.start()
-			gc_threads.append(t)
+			self.gc_threads.append(t)
+			
+		self.loadModules()
 
 	def readConfig(self):
 		config = ConfigParser.ConfigParser()
@@ -68,6 +74,7 @@ class GCClient(object):
 		self.password = config.get(GC_CONFIG_CATEGORY, GC_PASSWORD)
 		self.resp_exchange = config.get(GC_CONFIG_CATEGORY, GC_RESP_EXCHANGE)
 		self.resp_key = config.get(GC_CONFIG_CATEGORY, GC_RESP_KEY)
+		self.log_exchange = config.get(GC_CONFIG_CATEGORY, GC_LOG_EXCHANGE)
 		self.task_exchange = config.get(GC_CONFIG_CATEGORY, GC_TASK_EXCHANGE)
 		self.task_key = config.get(GC_CONFIG_CATEGORY, GC_TASK_KEY)
 		self.school_name = config.get(GC_CONFIG_CATEGORY, GC_SCHOOLNAME)
@@ -78,6 +85,13 @@ class GCClient(object):
 			self.clientid = socket.gethostname()
 		
 		self.uuid = self.school_name + "_" + self.clientid
+		self.log_key = self.uuid + ".logs" 
+	def readConfigItem(self, configItem):
+		config = ConfigParser.ConfigParser()
+		config.readfp(open('gcclient.ini'))
+
+		return config.get(GC_CONFIG_CATEGORY, configItem)
+		
 	
 	def loadModules(self):
 		# Add built in functions to the gc_modules dictionary`
@@ -93,20 +107,8 @@ class GCClient(object):
 			if os.path.isfile(file) and name.startswith('GC_CModule_') and ext == '.py':
 				
 				# Load the module
-				(f, filename, data) = imp.find_module(name, [path])
-				module = imp.load_module(name, f, filename, data)
-				
-				# Check module for a GC_CModule class
-				for name in dir(module):
-					obj = getattr(module, name)
-					
-					# Check module for a GC_CModule subclass, and not GC_CModule
-					if name != 'GC_CModule' and inspect.isclass(obj) and issubclass(obj, GC_CModule.GC_CModule):
-						# Load the module, and add it to the gc_modules dictionary
-						self.log(GC_Utility.DEBUG, "Loading GC_CModule: " + obj.__name__)
-						m = obj(self)
-						self.gc_modules[m.getModuleId()] = m
-						self.log(GC_Utility.INFO, "Loaded Module: " + m.getModuleId())
+				self.loadModule(file)
+
 
 	def quit(self) :
 		# Shutting down modules
@@ -117,11 +119,13 @@ class GCClient(object):
 				m.quit()
 		
 		# Turn off AMQP
-		#if GC_ENABLE_COMMS:
+		#if self.ENABLE_COMMS:
 		#	self.comms.quit()
+		
+		quit()
 
 	def logging_callback(self, ch, method, properties, body):
-		if GC_ENABLE_COMMS:
+		if self.ENABLE_COMMS:
 			self.log(GC_Utility.DEBUG, "Received Msg on " + method.routing_key)
 		
 		# 2. TaskCreateDT: String (YYYYMMDDZHHMMSS.SSS) <withheld><br>
@@ -134,10 +138,16 @@ class GCClient(object):
 		GC_Utility.print_dict(rcvd_task[GC_Utility.GC_CMD_DATA])
 		
 		rcvd_task[GC_Utility.GC_RECEIVE_TIME] = GC_Utility.currentZuluDT()
+		create_time = datetime.strptime(rcvd_task[GC_Utility.GC_RECEIVE_TIME], GC_Utility.GC_DATESTR_FORMAT)
 		
 		# Figure out which module... key/value pair on moduleid with objects....
 		if rcvd_task[GC_Utility.GC_MODULEID] in self.gc_modules:
-			self.gc_modules[rcvd_task[GC_Utility.GC_MODULEID]].handleTask(rcvd_task)
+			# Check create time + 5min
+			# TODO: use create time!!
+			if (datetime.utcnow() - create_time)  < timedelta(seconds=(60*5)):
+				self.gc_modules[rcvd_task[GC_Utility.GC_MODULEID]].handleTask(rcvd_task)
+			else:
+				self.log(GC_Utility.INFO, rcvd_task[GC_Utility.GC_TASK_ID] + " create time > 5 min old ")
 		else:
 			self.log(GC_Utility.INFO, rcvd_task[GC_Utility.GC_MODULEID] + " not found in ")
 			self.log(GC_Utility.DEBUG, self.gc_modules.keys())
@@ -154,14 +164,40 @@ class GCClient(object):
 		del taskObj[GC_Utility.GC_CMD_DATA]
 		GC_Utility.print_dict(taskObj)
 		
-		if GC_ENABLE_COMMS:
+		if self.ENABLE_COMMS:
+			self.comms.publish(exchange_name = self.resp_exchange, routing_key=self.resp_key, message = json.dumps(taskObj))
+	
+	def sendOneOffResult(self, moduleId, respData):
+		# 2. ModuleID: Integer Associated with command module<br>
+		# 3. TaskRef: Integer defined by module<br>
+		# 4. RecieveTime: String (YYYYMMDDZHHMMSS.SSS) <br>
+		# 5. CompleteTime: String (YYYYMMDDZHHMMSS.SSS) <br>
+		# 6. ResponseData: Key Value array, defined by module<br>
+		taskObj = []
+		taskObj[GC_Utility.GC_MODULEID] = moduleId
+		taskObj[GC_Utility.GC_COMPLETE_TIME] = GC_Utility.currentZuluDT()
+		taskObj[GC_Utility.GC_RESP_DATA] = respData
+		
+		GC_Utility.print_dict(taskObj)
+		
+		if self.ENABLE_COMMS:
 			self.comms.publish(exchange_name = self.resp_exchange, routing_key=self.resp_key, message = json.dumps(taskObj))
 
 	def log(self, log_level, msg):
+		log_msg = ""
+		
 		if (log_level == GC_Utility.DEBUG):
-			print "[DEBUG] " + msg 
+			log_msg = "[DEBUG] " + msg 
+		elif (log_level == GC_Utility.WARN):
+			log_msg = "[WARNING] " + msg
 		else:
-			print "[INFO] " + msg
+			log_msg = "[INFO] " + msg
+			
+		
+		if self.ENABLE_COMMS:
+			self.comms.publish(exchange_name = self.log_exchange, routing_key=self.log_key, message = log_msg)
+		
+		print log_msg
 			
 	def run_diag(gcclient, taskObj):
 		if (taskObj[GC_Utility.GC_MODULEID] == GC_Utility.GC_MOD_DIAG) :
@@ -180,22 +216,49 @@ class GCClient(object):
 				file_list[file] = hashlib.md5(open(file, 'rb').read()).hexdigest()
 		
 		diag_msg['Files'] = file_list
+		if (platform.system() == 'Windows'):
+			diag_msg['processList'] = subprocess.check_output('tasklist')
+		elif (platform.system() == 'Linux'):
+			diag_msg['processList'] = subprocess.check_output('ps', '-l')
+		else:
+			diag_msg['processList'] = "Error retrieving process list on platform %s" % platform.system()
+			
 		return diag_msg
 
-GC_ENABLE_COMMS = False
-instance = GCClient()
+	def loadModule(self, filename):
+		(path, name) = os.path.split(filename)
+		(name, ext) = os.path.splitext(name)
+		
+		# Check that this is a file exists
+		if os.path.isfile(filename) and ext == '.py':
+			
+			# Load the module
+			(f, filename, data) = imp.find_module(name, [path])
+			module = imp.load_module(name, f, filename, data)
+			
+			# Check module for a GC_CModule class
+			for name in dir(module):
+				obj = getattr(module, name)
+				
+				# Check module for a GC_CModule subclass, and not GC_CModule
+				if name != 'GC_CModule' and inspect.isclass(obj) and issubclass(obj, GC_CModule.GC_CModule):
+					# Load the module, and add it to the gc_modules dictionary
+					try: 
+						self.log(GC_Utility.DEBUG, "Loading GC_CModule: " + obj.__name__)
+						m = obj(self)
+						self.gc_modules[m.getModuleId()] = m
+						self.log(GC_Utility.INFO, "Loaded Module: " + m.getModuleId())
+					except AssertionError:
+						self.log(GC_Utility.WARN, "Failed to load module %s" % (name))
+		
+	# def reloadModule(self, moduleid):
+		# m = self.gc_modules[moduleid]
+		
+		# if not inspect.ismethod(m):
+			# mod_class = m.__class__
+			# cname = m.__name__
+			# m.quit()
+			# reload(cname)
+			
 
-taskObj = {}
-command = {}
-
-command['cmd'] = 'execute_url'
-command['url'] = 'https://www.cnn.com'
-command['timer'] = 2
-taskObj['TaskId'] = 'ABC123'
-taskObj['routingKey'] = 'GREYUNI.GREYTEST'
-taskObj[GC_Utility.GC_CMD_DATA] = command
-taskObj[GC_Utility.GC_MODULEID] = 'selenium'
-taskObj[GC_Utility.GC_TASKREF] = 'Ref123'
-
-instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
-instance.quit()
+		

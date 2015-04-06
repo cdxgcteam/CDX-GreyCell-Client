@@ -10,104 +10,74 @@ import time
 
 from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
-from selenium.webdriver.support.ui import WebDriverWait 
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.by import By
 
+import subprocess
+from threading import Thread
+import Queue
 
+import hashlib
+
+GC_SELENIUM_POLL_INTERVAL = 5
+GC_SELENIUM_PID_FILE = './selenium.pid'
+GC_SELENIUM_EXECUTE_URL = 'execute_url'
+GC_SELENIUM_DOWNLOAD_AND_EXEC = 'dl_execute'
 
 class GC_CModule_SeleniumTaskModule(GC_CModule):
-	SELENIUM_LINUX_DEFAULT_PATH = './selenium-server-standalone-2.41.0.jar'
-	SELENIUM_WINDOWS_DEFAULT_PATH = '.\\IEDriverServer.exe' #'.\\selenium-server-standalone-2.41.0.jar'
-	BROWSERMOB_LINUX_DEFAULT_PATH = './browsermob/browsermob-proxy-2.0-beta-9/bin/browsermob-proxy'
-	BROWSERMOB_WINDOWS_DEFAULT_PATH = '.\\browsermob\\browsermob-proxy-2.0-beta-9\\bin\\browsermob-proxy.bat'
-	SELENIUM_HOST = 'localhost'
-	SELENIUM_PORT = 4444
-	BROWSERMOB_HOST = 'localhost'
-	BROWSERMOB_PORT = 8080
 	MODULE_ID = 'selenium'
-	#SELENIUM_SERVER = null
-	#SELENIUM_DRIVER = null
 
 	def __init__(self, gcclient):
 		self.gcclient = gcclient
-		#self.BrowserMobPath = self.verifyBrowserMobPath('')
-		self.SeleniumPath = self.verifySeleniumPath('')
-		self.driver = self.makeDriver('firefox')
 		
-		#print 'BroweserMob ' + self.BrowserMobPath
-		print 'SeleniumPath ' + self.SeleniumPath
+		self.killPID()
 		
-	def quit(self):
-		self.selenium_driver.quit()
+		fp = webdriver.FirefoxProfile()
 
+		fp.set_preference("browser.download.folderList",2)
+		fp.set_preference("browser.download.manager.showWhenStarting",False)
+		fp.set_preference("browser.download.dir", os.getcwd())
+		fp.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/octet-stream")
+
+		self.driver = self.selenium_driver = webdriver.Firefox(firefox_profile=fp)
+		self.gcclient.log(GC_Utility.INFO, "Selenium Firefox started with PID %d" % self.driver.binary.process.pid)
+		
+		f = open(GC_SELENIUM_PID_FILE, 'w')
+		f.write("%d" % self.driver.binary.process.pid)
+		
+		self.Running = True
+		self.queue = Queue.Queue()
+		self.thread = Thread(target=self.queuePollingThread)
+		self.thread.start()
+	
+	def killPID(self):
+		if (os.path.isfile(GC_SELENIUM_PID_FILE)):
+			f = open(GC_SELENIUM_PID_FILE, 'r')
+			previous_pid = f.read()
+			f.close()
+			os.remove(GC_SELENIUM_PID_FILE)
+			
+			# check to see if the process is running and is firefox.exe
+			taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
+			if (taskList.find('firefox.exe') != -1):
+				self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
+				subprocess.call('taskkill /PID %s' % previous_pid)
+
+	def quit(self):
+		self.Running = False
+		self.thread.join()
+		self.selenium_driver.quit()
+		self.killPID()
+		
 	def getModuleId(self):
 		return self.MODULE_ID
 
-	def verifyBrowserMobPath(self, inputPath):
-		browsermob_path = ''
-		
-		if inputPath != '':
-			browsermob_path = inputPath;
-		elif platform.platform() == 'Linux':
-			browsermob_path = self.BROWSERMOB_LINUX_DEFAULT_PATH
-		elif platform.platform() == 'Windows' :
-			browsermob_path = self.BROWSERMOB_WINDOWS_DEFAULT_PATH
-		
-		if os.path.isfile(browsermob_path) :
-			return browsermob_path
-		else:
-			raise Exception('Browsermod Proxy path does not exist...')
-		
-	def verifySeleniumPath(self, inputPath) :
-		selenium_path = ''
-		
-		if inputPath != '' :
-			selenium_path = inputPath
-		elif platform.system() == 'Linux' :
-			selenium_path = self.SELENIUM_LINUX_DEFAULT_PATH
-		elif platform.system() == 'Windows' :
-			selenium_path = self.SELENIUM_WINDOWS_DEFAULT_PATH
-		
-		print platform.system()
-		
-		if os.path.isfile(selenium_path) :
-			return selenium_path
-		else :
-			raise Exception(TypeError, 'Selenium path does not exist...');
-
-	def makeDriver(self, cmdr) :
-		if (platform.system() == 'Windows') :
-			if (cmdr == 'ie') :
-				# IE Setup:
-				portStr = '--port=4444' # + cmdr.sel_port;
-				# TODO: Log when process returns... errors and non-errors
-				#self.selenium_process = subprocess.Popen(['IEDriverServer.exe', portStr]);
-				caps = DesiredCapabilities.INTERNETEXPLORER
-				caps['ignoreProtectedModeSettings'] = True
-				caps['browserName'] = 'internet explorer'
-				caps['platform'] = 'WINDOWS'
-				caps['INTRODUCE_FLAKINESS_BY_IGNORING_SECURITY_DOMAINS'] = True
-				
-				self.selenium_href = 'http://localhost:4444' #+ cmdr.sel_port;
-				
-				
-				self.selenium_driver = webdriver.Ie(self.SELENIUM_WINDOWS_DEFAULT_PATH, caps)
-				print "Web Driver Built"
-				
-			elif (cmdr == 'firefox') :
-				# Selenium will have to be started MANUALLY!!!!...
-				self.selenium_href = 'http://localhost:4444/wd/hub'
-				self.selenium_driver = webdriver.Firefox()
-		elif (platform.platform() == 'linux') : 
-			if (cmdr.browser == 'firefox') :
-				self.selenium_href = 'http://127.0.0.1:'+cmdr.sel_port+'/wd/hub';
-				
-				self.selenium_driver = webdriver.Builder().usingServer(serverAddress).withCapabilities(webdriver.Capabilities.firefox()).build()
 
 	def handleTask(self, gccommand) :
-		self.gcclient.log(1, "handleTask :: [x] " + gccommand[GC_Utility.GC_TASKREF] + ": ")#+ gccommand['command'])
+		self.gcclient.log(GC_Utility.DEBUG, "queuingTask - [%s:%s] " % (gccommand[GC_Utility.GC_MODULEID], gccommand[GC_Utility.GC_TASKREF]) )
+		self.queue.put(gccommand)
+		self.gcclient.log(GC_Utility.DEBUG, "queueStatus - [%s:%s tasks] " % (gccommand[GC_Utility.GC_MODULEID], self.queue.qsize() ))
+
+	def execTask(self, gccommand):
+		self.gcclient.log(GC_Utility.DEBUG, "handleTask - [%s:%s] " % (gccommand[GC_Utility.GC_MODULEID], gccommand[GC_Utility.GC_TASKREF]) )
 		
 		startTime =  GC_Utility.currentZuluDT()
 		
@@ -115,16 +85,15 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 		
 		response = {}
 		response['startTime'] = startTime
-		
-		self.gcclient.log(1, 'handleTask :: Tasking Object:\n')#+util.inspect(taskingObj))
 
-		#TODO Fix GCClient DEBUG Circular Dependency issue
-		self.gcclient.log(1, 'handleTask :: execute_url :: Executing task...')
+		self.gcclient.log(GC_Utility.DEBUG, 'excuteCmd : [%s:%s(%s)]' % (gccommand[GC_Utility.GC_MODULEID], taskingObj['cmd'], taskingObj['url']))
 		
 		oldtitle = self.selenium_driver.title
 		
 		self.selenium_driver.get(taskingObj['url'])
 		timerstart = datetime.utcnow()
+		self.gcclient.log(GC_Utility.DEBUG, 'executeCmd : [%s pausing for %s sec]' % (gccommand[GC_Utility.GC_MODULEID], taskingObj['timer']))
+		
 		time.sleep(taskingObj['timer'])
 		
 		while ((self.selenium_driver.title == oldtitle) or ((datetime.utcnow() - timerstart).seconds > 30)):
@@ -135,132 +104,17 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 			print "FAILURE!!!"
 			
 		response['Title'] = self.selenium_driver.title
+		response['page_md5'] = hashlib.md5(self.selenium_driver.page_source.encode("utf-8")).hexdigest()
+		
 		
 		self.selenium_driver.get('about:blank')
 		
-		# try:
-			# element = WebDriverWait(self.selenium_driver, 10).until(
-				# EC.presence_of_element_located((By.ID, "Title"))
-			# )
-		# finally:
-			# #self.selenium_driver.quit()
-			# response['Title'] = self.selenium_driver.title
-		# #self.selenium_driver.sleep(taskingObj['workTime'])
-		
-		
-		self.gcclient.log(1, 'handleTask :: execute_url :: Sending result...');
-		self.gcclient.sendResult(gccommand, response);
+		self.gcclient.log(GC_Utility.DEBUG, 'sendResult :[%s:%s] ' % (gccommand[GC_Utility.GC_MODULEID], gccommand[GC_Utility.GC_TASKREF]) )
+		self.gcclient.sendResult(gccommand, response)
 
-			
-
-	def sendResult(self, amqpmsg, taskID, output, startTime) :
-		result = {}
-		result['taskID'] = taskID
-		result['output'] = output
-		result['executor'] = EXECUTOR
-		result['os_platform'] = platform.uname()
-		result['browser'] = cmdr.browser
-		result['startTime'] = startTime
-		result['endTime'] =  GC_Utility.currentZuluDT()
-		result['elapsedTime'] = result['endTime'] - result['startTime']
-		self.gcclient.log(result)
-		
-		# logger.debug('sendResult :: Result:\n'+util.inspect(result))
-
-		#var message = JSON.stringify(result);
-		# AMQP_CH.publish(AMQP_RESULTS_EXCHANGE, AMQP_RESULTS_ROUTING_KEY, new Buffer(message))
-		# logger.debug("sendResult :: RESULT Sent!! :: %s:'%s'", AMQP_RESULTS_ROUTING_KEY, message)
-		# AMQP_CH.ack(amqpmsg)
-
-	# def start(self) :
-		# // Start Driver:
-		
-		
-		# return driver;
-		# }).then(function (driver) {
-				# SELENIUM_DRIVER = driver;
-				# var amqpServerPath = 'amqp://'+cmdr.amqp_host+':'+cmdr.amqp_port;
-				# logger.info('AMQP Path: '+amqpServerPath);
-				# amqp.connect(amqpServerPath).then(function(conn) {
-					# return when(conn.createChannel().then(function(ch) {
-						# AMQP_CH = ch;
-						# // Setup signals:
-						# process.on('SIGINT', function () {
-							# logger.info('SIGNAL: SIGINT caught: Closing connection.');
-							# SELENIUM_DRIVER.quit();
-							# AMQP_CH.close();
-							# process.exit(1); // May need to kick out.
-						# });
-						
-						# process.on('SIGTERM', function () {
-							# logger.info('SIGNAL: SIGTERM caught: Closing connection.');
-							# SELENIUM_DRIVER.quit();
-							# AMQP_CH.close();
-							# process.exit(1); // May need to kick out.
-						# });
+	def queuePollingThread(self):
+		while self.Running:
+			while not self.queue.empty():
+				self.execTask(self.queue.get(False))
 				
-						# var tasks = ch.assertExchange(AMQP_TASK_EXCHANGE, 'topic', {durable: false});
-						# tasks = tasks.then(function() {
-							# logger.info('AMQP :: Tasks Exchange Asserted.');
-							# return ch.assertQueue('', {exclusive: true});
-						# });
-				
-						# tasks = tasks.then(function(qok) {
-							# logger.info('AMQP :: Tasks Queue Asserted.');
-							# var queue = qok.queue;
-							# return all(AMQP_TASK_BINDING_KEYS.map(function(rk) {
-								# ch.bindQueue(queue, AMQP_TASK_EXCHANGE, rk);
-							# })).then(function() {
-								# logger.info('AMQP :: Tasks Queues Binded.');
-								# return queue;
-							# });
-						# });
-						
-						# tasks = tasks.then(function(queue) {
-							# ch.prefetch(1);
-							# return ch.consume(queue, handleTask, {noAck: false});
-						# });
-				
-						# return tasks.then(function() {
-							# logger.info(' AMQP :: Waiting for tasks. To exit press CTRL+C.');
-						# });
-					# }));
-				# }).then(null, logger.warn);
-
-
-# gctest = GC_CModule_SeleniumTaskModule(gcclient = GCClient.instance)
-
-# taskObj = {}
-# command = {}
-
-# command['cmd'] = 'execute_url'
-# command['url'] = 'https://www.google.com'
-# command['workTime'] = 3600
-# taskObj['TaskId'] = 'ABC123'
-# taskObj[GCClient.GC_CLIENTID] = 'Client123'
-# taskObj['routingKey'] = 'abc123'
-# taskObj[GCClient.GC_CMD_DATA] = command
-# taskObj[GCClient.GC_MODULEID] = 'selenium'
-# taskObj[GCClient.GC_TASKREF] = 'Ref123'
-# taskObj[GCClient.GC_RECEIVE_TIME] =  GC_Utility.currentZuluDT()
-# time.sleep(5)
-
-# gctest.handleTask(taskObj)
-
-# taskObj = {}
-# command = {}
-
-# command['cmd'] = 'execute_url'
-# command['url'] = 'https://www.cnn.com'
-# command['workTime'] = 3600
-# taskObj['TaskId'] = 'ABC123'
-# taskObj[GCClient.GC_CLIENTID] = 'Client123'
-# taskObj['routingKey'] = 'abc123'
-# taskObj[GCClient.GC_CMD_DATA] = command
-# taskObj[GCClient.GC_MODULEID] = 'selenium'
-# taskObj[GCClient.GC_TASKREF] = 'Ref123'
-# taskObj[GCClient.GC_RECEIVE_TIME] =  GC_Utility.currentZuluDT()
-
-# time.sleep(5)
-
-# gctest.handleTask(taskObj)
+			time.sleep(GC_SELENIUM_POLL_INTERVAL)

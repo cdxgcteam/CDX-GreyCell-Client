@@ -27,7 +27,7 @@ class GCClient_Comms(object):
 				
 				connection.close()
 				success = True
-			except AMQPConnectionError:
+			except:
 				print "Connection Error"
 				tries = tries + 1
 				time.sleep(5)
@@ -58,7 +58,7 @@ class GCClient_Comms(object):
 										no_ack=True)
 
 				channel.start_consuming()
-			except AMQPConnectionError:
+			except:
 				print "Connection Error"
 				tries = tries + 1
 				time.sleep(5)
