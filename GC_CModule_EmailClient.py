@@ -17,7 +17,7 @@ GC_EMAIL_CONFIG_PWORD = "EMAIL.PWORD"
 class GC_CModule_EmailClient(GC_CModule):
 	MODULE_ID = 'email'
 
-	Running = True
+	
 	
 	msg_cache = {}
 	
@@ -44,7 +44,8 @@ class GC_CModule_EmailClient(GC_CModule):
 		except Exception as e:
 			self.gcclient.log(GC_Utility.WARN, "Module Email Client failed to create IMAP connection [%s]" % e)
 			raise AssertionError()
-		
+			
+		self.Running = True
 		self.t = Thread(target=self.inboxPoll)
 		self.t.start()
 
@@ -72,13 +73,12 @@ class GC_CModule_EmailClient(GC_CModule):
 	def quit(self):
 		self.Running = False
 		
-		return True
 	
 	def inboxPoll(self):
 		self.count = 0
 		
 		while self.Running:
-			self.gcclient.log(GC_Utility.DEBUG, 'handleTask :: email :: Sending result...');
+			self.gcclient.log(GC_Utility.DEBUG, 'emailClient : Polling imap server');
 			result, data = self.mail.search(None, "(UNSEEN)")
 
 			ids = data[0] # data is a list.

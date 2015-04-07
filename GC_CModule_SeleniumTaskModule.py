@@ -30,6 +30,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 		
 		self.killPID()
 		
+		# Enable saving files
 		fp = webdriver.FirefoxProfile()
 
 		fp.set_preference("browser.download.folderList",2)
@@ -53,13 +54,15 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 			f = open(GC_SELENIUM_PID_FILE, 'r')
 			previous_pid = f.read()
 			f.close()
-			os.remove(GC_SELENIUM_PID_FILE)
+			
 			
 			# check to see if the process is running and is firefox.exe
 			taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
 			if (taskList.find('firefox.exe') != -1):
 				self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
 				subprocess.call('taskkill /PID %s' % previous_pid)
+			
+			os.remove(GC_SELENIUM_PID_FILE)
 
 	def quit(self):
 		self.Running = False
@@ -104,6 +107,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 			print "FAILURE!!!"
 			
 		response['Title'] = self.selenium_driver.title
+		
 		response['page_md5'] = hashlib.md5(self.selenium_driver.page_source.encode("utf-8")).hexdigest()
 		
 		
@@ -114,7 +118,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 
 	def queuePollingThread(self):
 		while self.Running:
-			while not self.queue.empty():
+			while not self.queue.empty() and self.Running:
 				self.execTask(self.queue.get(False))
 				
 			time.sleep(GC_SELENIUM_POLL_INTERVAL)

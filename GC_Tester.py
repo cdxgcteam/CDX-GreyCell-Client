@@ -3,7 +3,7 @@ import GC_Utility
 import json
 import time
 
-instance = GCClient(debug = True, enable_comms = False)
+instance = GCClient(debug = True, enable_comms = True)
 
 taskObj = {}
 command = {}
@@ -43,12 +43,22 @@ taskObj[GC_Utility.GC_CMD_DATA] = command
 
 instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
 taskObj[GC_Utility.GC_TASKREF] = 'Ref456'
-taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'https://news.google.com'
+taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'https://bitcoin.org/bitcoin.pdf'
 
 instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
 
-taskObj[GC_Utility.GC_TASKREF] = 'Ref789'
-taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'http://127.0.0.1'
+# taskObj[GC_Utility.GC_TASKREF] = 'Ref789'
+# taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'http://127.0.0.1'
+# instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
+
+taskObj[GC_Utility.GC_MODULEID] = 'download'
+taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'https://www.cnn.com'
+command['saveas'] = '.\\cnn_index.html'
+instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
+
+taskObj[GC_Utility.GC_MODULEID] = 'download'
+taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'https://bitcoin.org/bitcoin.pdf'
+command['saveas'] = '.\\bitcoin.pdf'
 instance.logging_callback('ch', 'method', 'properties', json.dumps(taskObj))
 
 time.sleep(5*60)

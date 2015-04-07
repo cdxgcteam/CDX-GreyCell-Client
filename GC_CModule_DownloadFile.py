@@ -4,6 +4,7 @@ import urllib2
 import hashlib
 import os
 import shutil
+import ssl
 
 class GC_CModule_DownloadFile(GC_CModule):
 	MODULE_ID = 'download'
@@ -21,14 +22,15 @@ class GC_CModule_DownloadFile(GC_CModule):
 		response = {}
 		response['startTime'] = startTime
 		
-		self.gcclient.log(GC_Utility.DEBUG, 'handleTask :: Tasking Object:\n')
+		self.gcclient.log(GC_Utility.DEBUG, 'downloadFile: [%s as %s]' % (taskingObj['url'], taskingObj['saveas']))
 		
 		# Check for existing file, move it to back up
 		self.handleBackup(taskingObj['saveas'])
 		
 		# Download the file
 		try:
-			f = urllib2.urlopen(taskingObj['url'])
+			context = ssl._create_unverified_context()
+			f = urllib2.urlopen(taskingObj['url'], context=context)
 			data = f.read()
 			with open(taskingObj['saveas'], "wb") as code:
 				code.write(data)
@@ -38,7 +40,7 @@ class GC_CModule_DownloadFile(GC_CModule):
 		except urllib2.HTTPError as e:
 			response['ERROR'] = "HTTP Error " + unicode(e.code)
 		
-		self.gcclient.log(GC_Utility.DEBUG, 'handleTask :: download :: Sending result...');
+		self.gcclient.log(GC_Utility.DEBUG, 'downloadFile : Sending result...');
 		self.gcclient.sendResult(gccommand, response);
 	
 	def getModuleId(self):

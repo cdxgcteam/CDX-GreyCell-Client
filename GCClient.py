@@ -14,6 +14,7 @@ import threading
 import imp
 import inspect
 import subprocess
+import inspect
 
 instance = None
 GC_AMQP_HOST = 'AMQP_HOST'
@@ -22,6 +23,7 @@ GC_PASSWORD = 'PASSWORD'
 GC_RESP_EXCHANGE = 'RESP_EXCHANGE'
 GC_RESP_KEY = 'RESP_KEY'
 GC_LOG_EXCHANGE = 'LOG_EXCHANGE'
+GC_LOG_KEY = 'LOG_KEY'
 GC_TASK_EXCHANGE = 'TASK_EXCHANGE'
 GC_TASK_KEY = 'TASK_KEY'
 GC_SCHOOLNAME = 'SCHOOLNAME'
@@ -39,6 +41,7 @@ class GCClient(object):
 	gc_threads = []
 	
 	def __init__(self, debug = False, enable_comms = True):
+		self.Running = True
 		self.PRINT_DEBUG = debug
 		
 		self.ENABLE_COMMS = enable_comms
@@ -52,20 +55,15 @@ class GCClient(object):
 			self.comms = GCClient_Comms.GCClient_Comms(gc_host = self.gc_host, userid = self.userid, password = self.password)
 
 			# Start Listening to exchanges
-			t = threading.Thread(name=GC_ALL_TASKS, target=self.comms.monitor, args=(self.task_exchange, GC_ALL_TASKS, self.logging_callback))
-			t.start()
-			self.gc_threads.append(t)
-			
-			t = threading.Thread(name=self.school_name, target=self.comms.monitor, args=(self.task_exchange, self.school_name + GC_TASK_ROUTINGKEY, self.logging_callback))
-			t.start()
-			self.gc_threads.append(t)
-			
-			t = threading.Thread(name=self.uuid, target=self.comms.monitor, args=(self.task_exchange, self.uuid + GC_TASK_ROUTINGKEY, self.logging_callback))
+			t = threading.Thread(name=GC_ALL_TASKS, target=self.comms.monitor, args=(self.task_exchange, [GC_ALL_TASKS, self.school_name + GC_TASK_ROUTINGKEY,  self.uuid + GC_TASK_ROUTINGKEY], self.logging_callback))
 			t.start()
 			self.gc_threads.append(t)
 			
 		self.loadModules()
-
+		
+	def isRunning(self):
+		return self.Running
+		
 	def readConfig(self):
 		config = ConfigParser.ConfigParser()
 		config.readfp(open('gcclient.ini'))
@@ -75,6 +73,7 @@ class GCClient(object):
 		self.resp_exchange = config.get(GC_CONFIG_CATEGORY, GC_RESP_EXCHANGE)
 		self.resp_key = config.get(GC_CONFIG_CATEGORY, GC_RESP_KEY)
 		self.log_exchange = config.get(GC_CONFIG_CATEGORY, GC_LOG_EXCHANGE)
+		self.log_key = config.get(GC_CONFIG_CATEGORY, GC_LOG_KEY)
 		self.task_exchange = config.get(GC_CONFIG_CATEGORY, GC_TASK_EXCHANGE)
 		self.task_key = config.get(GC_CONFIG_CATEGORY, GC_TASK_KEY)
 		self.school_name = config.get(GC_CONFIG_CATEGORY, GC_SCHOOLNAME)
@@ -85,7 +84,7 @@ class GCClient(object):
 			self.clientid = socket.gethostname()
 		
 		self.uuid = self.school_name + "_" + self.clientid
-		self.log_key = self.uuid + ".logs" 
+	
 	def readConfigItem(self, configItem):
 		config = ConfigParser.ConfigParser()
 		config.readfp(open('gcclient.ini'))
@@ -119,14 +118,15 @@ class GCClient(object):
 				m.quit()
 		
 		# Turn off AMQP
-		#if self.ENABLE_COMMS:
-		#	self.comms.quit()
-		
-		quit()
+		if self.ENABLE_COMMS:
+			self.comms.quit()
+
+		self.Running = False
+
 
 	def logging_callback(self, ch, method, properties, body):
 		if self.ENABLE_COMMS:
-			self.log(GC_Utility.DEBUG, "Received Msg on " + method.routing_key)
+			self.log(GC_Utility.DEBUG, "Received msg") #method.routing_key)
 		
 		# 2. TaskCreateDT: String (YYYYMMDDZHHMMSS.SSS) <withheld><br>
 		# 3. ModuleID: Integer Associated with command module<br>
@@ -145,12 +145,15 @@ class GCClient(object):
 			# Check create time + 5min
 			# TODO: use create time!!
 			if (datetime.utcnow() - create_time)  < timedelta(seconds=(60*5)):
-				self.gc_modules[rcvd_task[GC_Utility.GC_MODULEID]].handleTask(rcvd_task)
+				try:
+					self.gc_modules[rcvd_task[GC_Utility.GC_MODULEID]].handleTask(rcvd_task)
+				except Exception as e:
+					self.log(GC_Utility.WARN, "GCClient.logging_callback caught exception %s" % e)
 			else:
 				self.log(GC_Utility.INFO, rcvd_task[GC_Utility.GC_TASK_ID] + " create time > 5 min old ")
 		else:
 			self.log(GC_Utility.INFO, rcvd_task[GC_Utility.GC_MODULEID] + " not found in ")
-			self.log(GC_Utility.DEBUG, self.gc_modules.keys())
+			#self.log(GC_Utility.DEBUG, self.gc_modules.keys())
 
 	def sendResult(self, taskObj, respData):
 		# 2. ModuleID: Integer Associated with command module<br>
@@ -184,20 +187,29 @@ class GCClient(object):
 			self.comms.publish(exchange_name = self.resp_exchange, routing_key=self.resp_key, message = json.dumps(taskObj))
 
 	def log(self, log_level, msg):
-		log_msg = ""
+		log_msg = {}
+		log_msg['datetime'] = GC_Utility.currentZuluDT()
+
+		log_msg['msg'] = msg
+		
+		curframe = inspect.currentframe()
+		calframe = inspect.getouterframes(curframe, 2)
+
+
+		log_msg['caller'] = calframe[1][3]
 		
 		if (log_level == GC_Utility.DEBUG):
-			log_msg = "[DEBUG] " + msg 
+			log_msg['level'] = "DEBUG" 
 		elif (log_level == GC_Utility.WARN):
-			log_msg = "[WARNING] " + msg
+			log_msg['level'] = "WARNING"
 		else:
-			log_msg = "[INFO] " + msg
+			log_msg['level'] = "INFO"
 			
 		
 		if self.ENABLE_COMMS:
-			self.comms.publish(exchange_name = self.log_exchange, routing_key=self.log_key, message = log_msg)
-		
-		print log_msg
+			self.comms.publish(exchange_name = self.log_exchange, routing_key=self.log_key, type='direct', message = json.dumps(log_msg))
+		else:
+			print log_msg
 			
 	def run_diag(gcclient, taskObj):
 		if (taskObj[GC_Utility.GC_MODULEID] == GC_Utility.GC_MOD_DIAG) :
