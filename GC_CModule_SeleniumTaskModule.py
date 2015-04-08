@@ -57,12 +57,16 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 			
 			
 			# check to see if the process is running and is firefox.exe
-			taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
-			if (taskList.find('firefox.exe') != -1):
-				self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
-				subprocess.call('taskkill /PID %s' % previous_pid)
+			try:
+				taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
+				if (taskList.find('firefox.exe') != -1):
+					self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
+					subprocess.call('taskkill /PID %s' % previous_pid)
 			
-			os.remove(GC_SELENIUM_PID_FILE)
+			
+				os.remove(GC_SELENIUM_PID_FILE)
+			except:
+				self.gcclient.log(GC_Utility.WARN, "Failed to kill process %s and/or clean up pid file" % previous_pid)
 
 	def quit(self):
 		self.Running = False
