@@ -1,4 +1,6 @@
 from datetime import datetime
+import os
+import shutil
 
 DEBUG = 1
 INFO = 2
@@ -28,3 +30,32 @@ def currentZuluDT():
 def print_dict(dict):
 	 for k, v in dict.iteritems():
 		print k, ": ", v
+
+# If filename already exists, move it to a backup directory
+# Create the backup directory if necessary
+# increment the filename as necessary
+def handleBackup(filename):
+	if (os.path.isfile(filename)):
+		(path, fname) = os.path.split(filename)
+		(name, ext) = os.path.splitext(fname)
+		backupdir = path+"\\backup"
+		
+		# Create the backup directory if necessary
+		if (not os.path.isdir(backupdir)):
+			self.gcclient.log(GC_Utility.DEBUG, 'GC_CModule_DownloadFile.handleBackup:: creating ' + backupdir)
+			os.mkdir(backupdir)
+		
+		backupfile = backupdir + "\\" + name + ".bak"
+		
+		# increment the filename as necessary
+		if(os.path.isfile(backupfile)):
+			numbackups = 0
+			backupfile = backupdir + "\\" + name + ".bak" + unicode(numbackups)
+			
+			while (os.path.isfile(backupfile)):
+				numbackups = numbackups + 1
+				backupfile = backupdir + "\\" + name + ".bak" + unicode(numbackups)
+		
+		# Moving the existing file to the backup dir
+		self.gcclient.log(GC_Utility.INFO, 'GC_CModule_DownloadFile.handleBackup:: moving ' + filename + " to " + backupfile)
+		shutil.move(filename, backupfile)

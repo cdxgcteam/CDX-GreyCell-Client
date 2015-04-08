@@ -25,7 +25,7 @@ class GC_CModule_DownloadFile(GC_CModule):
 		self.gcclient.log(GC_Utility.DEBUG, 'downloadFile: [%s as %s]' % (taskingObj['url'], taskingObj['saveas']))
 		
 		# Check for existing file, move it to back up
-		self.handleBackup(taskingObj['saveas'])
+		GC_Utility.handleBackup(taskingObj['saveas'])
 		
 		# Download the file
 		try:
@@ -48,32 +48,3 @@ class GC_CModule_DownloadFile(GC_CModule):
 	
 	def quit(self):
 		return True
-	
-	# If filename already exists, move it to a backup directory
-	# Create the backup directory if necessary
-	# increment the filename as necessary
-	def handleBackup(self, filename):
-		if (os.path.isfile(filename)):
-			(path, fname) = os.path.split(filename)
-			(name, ext) = os.path.splitext(fname)
-			backupdir = path+"\\backup"
-			
-			# Create the backup directory if necessary
-			if (not os.path.isdir(backupdir)):
-				self.gcclient.log(GC_Utility.DEBUG, 'GC_CModule_DownloadFile.handleBackup:: creating ' + backupdir)
-				os.mkdir(backupdir)
-			
-			backupfile = backupdir + "\\" + name + ".bak"
-			
-			# increment the filename as necessary
-			if(os.path.isfile(backupfile)):
-				numbackups = 0
-				backupfile = backupdir + "\\" + name + ".bak" + unicode(numbackups)
-				
-				while (os.path.isfile(backupfile)):
-					numbackups = numbackups + 1
-					backupfile = backupdir + "\\" + name + ".bak" + unicode(numbackups)
-			
-			# Moving the existing file to the backup dir
-			self.gcclient.log(GC_Utility.INFO, 'GC_CModule_DownloadFile.handleBackup:: moving ' + filename + " to " + backupfile)
-			shutil.move(filename, backupfile)
