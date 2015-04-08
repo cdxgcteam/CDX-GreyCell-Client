@@ -121,11 +121,31 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 		
 		if (self.selenium_driver.title == oldtitle):
 			print "FAILURE!!!"
-			
+		
+		# Pulling the title of the page
 		response['Title'] = self.selenium_driver.title
 		
+		# Hashing the whole page
 		response['page_md5'] = hashlib.md5(self.selenium_driver.page_source.encode("utf-8")).hexdigest()
 		
+		# Hashing every link on the page
+		elements = self.selenium_driver.find_elements_by_xpath("//a")
+		hash_links = ""
+		
+		for link in elements:
+			try:
+				if str(link.get_attribute("href"))[0:4] == "http":
+					hash_links = hash_links + str(link.get_attribute("href"))
+					#print str(link.get_attribute("href"))
+			except StaleElementReferenceException:
+				pass
+		
+		response['links_md5'] = hashlib.md5(hash_links).hexdigest()
+		
+		# Diagnostics for figuring what source is being provided back.
+		# f = open('./%s.html' % gccommand[GC_Utility.GC_TASKREF], 'w')
+		# f.write(self.selenium_driver.page_source.encode("utf-8"))
+		# f.close()
 		
 		self.selenium_driver.get('about:blank')
 		
