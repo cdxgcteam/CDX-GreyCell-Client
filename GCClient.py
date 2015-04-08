@@ -188,15 +188,15 @@ class GCClient(object):
 
 	def log(self, log_level, msg):
 		log_msg = {}
-		log_msg['datetime'] = GC_Utility.currentZuluDT()
-
-		log_msg['msg'] = msg
+		log_msg[GC_Utility.GC_LOG_DATETIME] = GC_Utility.currentZuluDT()
+		log_msg[GC_Utility.GC_CLIENTID] = self.uuid
+		log_msg[GC_Utility.GC_LOG_MSG] = msg
 		
 		curframe = inspect.currentframe()
 		calframe = inspect.getouterframes(curframe, 2)
 
-
-		log_msg['caller'] = calframe[1][3]
+		
+		log_msg['caller'] = "%s:%s:%s" % (calframe[1][1], calframe[1][3], calframe[1][2])
 		
 		if (log_level == GC_Utility.DEBUG):
 			log_msg['level'] = "DEBUG" 

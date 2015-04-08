@@ -19,6 +19,8 @@ GC_MOD_QUIT = 'Quit'
 GC_MOD_RELOAD = 'Reload'
 GC_MOD_INSTALL = 'Install'
 GC_DATESTR_FORMAT = '%Y%m%dZ%H%M%S.%f'
+GC_LOG_DATETIME = 'datetime'
+GC_LOG_MSG = 'msg'
 
 def currentZuluDT():
 	return datetime.utcnow().strftime(GC_DATESTR_FORMAT)[:19]
