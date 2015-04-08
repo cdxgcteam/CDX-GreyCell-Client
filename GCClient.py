@@ -91,7 +91,6 @@ class GCClient(object):
 
 		return config.get(GC_CONFIG_CATEGORY, configItem)
 		
-	
 	def loadModules(self):
 		# Add built in functions to the gc_modules dictionary`
 		self.gc_modules[GC_Utility.GC_MOD_DIAG] = self.run_diag
@@ -108,7 +107,6 @@ class GCClient(object):
 				# Load the module
 				self.loadModule(file)
 
-
 	def quit(self) :
 		# Shutting down modules
 		for name in self.gc_modules:
@@ -122,7 +120,6 @@ class GCClient(object):
 			self.comms.quit()
 
 		self.Running = False
-
 
 	def logging_callback(self, ch, method, properties, body):
 		if self.ENABLE_COMMS:
@@ -195,7 +192,6 @@ class GCClient(object):
 		curframe = inspect.currentframe()
 		calframe = inspect.getouterframes(curframe, 2)
 
-		
 		log_msg['caller'] = "%s:%s:%s" % (calframe[1][1], calframe[1][3], calframe[1][2])
 		
 		if (log_level == GC_Utility.DEBUG):
@@ -205,7 +201,6 @@ class GCClient(object):
 		else:
 			log_msg['level'] = "INFO"
 			
-		
 		if self.ENABLE_COMMS:
 			self.comms.publish(exchange_name = self.log_exchange, routing_key=self.log_key, type='direct', message = json.dumps(log_msg))
 		else:
@@ -231,7 +226,7 @@ class GCClient(object):
 		if (platform.system() == 'Windows'):
 			diag_msg['processList'] = subprocess.check_output('tasklist')
 		elif (platform.system() == 'Linux'):
-			diag_msg['processList'] = subprocess.check_output('ps', '-l')
+			diag_msg['processList'] = subprocess.check_output(['ps','-l'])
 		else:
 			diag_msg['processList'] = "Error retrieving process list on platform %s" % platform.system()
 			

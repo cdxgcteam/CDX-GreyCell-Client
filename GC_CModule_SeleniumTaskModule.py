@@ -43,7 +43,8 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 		
 		f = open(GC_SELENIUM_PID_FILE, 'w')
 		f.write("%d" % self.driver.binary.process.pid)
-		
+		f.close()
+
 		self.Running = True
 		self.queue = Queue.Queue()
 		self.thread = Thread(target=self.queuePollingThread)
@@ -51,22 +52,33 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 	
 	def killPID(self):
 		if (os.path.isfile(GC_SELENIUM_PID_FILE)):
+			my_os = platform.system()
+
 			f = open(GC_SELENIUM_PID_FILE, 'r')
 			previous_pid = f.read()
 			f.close()
 			
-			
 			# check to see if the process is running and is firefox.exe
 			try:
-				taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
-				if (taskList.find('firefox.exe') != -1):
-					self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
-					subprocess.call('taskkill /PID %s' % previous_pid)
-			
+                                if (my_os == 'Windows'):
+					taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
+					if (taskList.find('firefox.exe') != -1):
+						self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
+						subprocess.call('taskkill /PID %s' % previous_pid)
+				elif (my_os == 'Linux'):
+					print "ps -p %s" % previous_pid
+					taskList = subprocess.check_output("ps -p %s" % previous_pid, shell=True)
+					print "Linux Tasklist [%s]" % taskList
+
+					if (taskList.find('firefox') != -1):
+						self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
+						subprocess.call(['kill', '-9', previous_pid])
+				else:
+					self.gcclient.log(GC_Utility.WARN, 'Unable to kill PID %s on platform %s' % (previous_pid, my_os))
 			
 				os.remove(GC_SELENIUM_PID_FILE)
-			except:
-				self.gcclient.log(GC_Utility.WARN, "Failed to kill process %s and/or clean up pid file" % previous_pid)
+			except Exception as e:
+				return
 
 	def quit(self):
 		self.Running = False
