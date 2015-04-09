@@ -13,13 +13,10 @@ GC_EMAIL_CONFIG_IMAP_SRV = "EMAIL.IMAPSRV"
 GC_EMAIL_CONFIG_IMAP_PORT = "EMAIL.IMAPPORT"
 GC_EMAIL_CONFIG_UNAME = "EMAIL.UNAME"
 GC_EMAIL_CONFIG_PWORD = "EMAIL.PWORD"
+GC_EMAIL_ATTACHMENT_DIR = "./attachments"
 
 class GC_CModule_EmailClient(GC_CModule):
 	MODULE_ID = 'email'
-
-	
-	
-	msg_cache = {}
 	
 	def __init__(self, gcclient):
 		self.gcclient = gcclient
@@ -88,12 +85,41 @@ class GC_CModule_EmailClient(GC_CModule):
 				result, data = self.mail.fetch(num, "(RFC822)") # fetch the email body (RFC822) for the given ID
 				typ, data = self.mail.store(num,'-FLAGS','\\Seen')
 	
-				msg_cache[num] = data[0][1] # here's the body, which is raw text of the whole email
+				msg = email.message_from_string(data[0][1]) # here's the body, which is raw text of the whole email
 
 				response = {}
 
 				response['cmd'] = 'receivedEmail'
 				response['msg'] = data[0][1]
+				
+				if mail.get_content_maintype() != 'multipart':
+					for part in mail.walk():
+						# multipart are just containers, so we skip them
+						if part.get_content_maintype() == 'multipart':
+							continue
+
+						# is this part an attachment ?
+						if part.get('Content-Disposition') is None:
+							continue
+
+						filename = part.get_filename()
+						counter = 1
+
+						# if there is no filename, we create one with a counter to avoid duplicates
+						if not filename:
+							filename = 'part-%03d%s' % (counter, 'bin')
+							counter += 1
+
+						att_path = os.path.join(GC_EMAIL_ATTACHMENT_DIR, filename)
+						
+						#Check if its already there
+						if os.path.isfile(att_path) :
+							GC_Utility.handleBackup(att_path)
+						
+						# finally write the stuff
+						fp = open(att_path, 'wb')
+						fp.write(part.get_payload(decode=True))
+						fp.close()
 				
 				self.gcclient.sendOneOffResult(self.MODULE_ID, response)
 				
