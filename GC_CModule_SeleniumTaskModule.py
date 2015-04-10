@@ -60,7 +60,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 			
 			# check to see if the process is running and is firefox.exe
 			try:
-                                if (my_os == 'Windows'):
+				if (my_os == 'Windows'):
 					taskList = subprocess.check_output('tasklist /FI "PID eq %s"' % previous_pid)
 					if (taskList.find('firefox.exe') != -1):
 						self.gcclient.log(GC_Utility.INFO, "Killing previous process with PID %s" % previous_pid)
@@ -124,6 +124,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 		
 		# Pulling the title of the page
 		response['Title'] = self.selenium_driver.title
+		
 		
 		# Hashing the whole page
 		response['page_md5'] = hashlib.md5(self.selenium_driver.page_source.encode("utf-8")).hexdigest()
