@@ -5,6 +5,7 @@ import smtplib
 from threading import Thread
 import time
 import email
+import os
 
 GC_EMAIL_POLL_INTERVAL = 60*1
 GC_EMAIL_CONFIG_SMTP_SRV = "EMAIL.SMTPSRV"
@@ -13,7 +14,7 @@ GC_EMAIL_CONFIG_IMAP_SRV = "EMAIL.IMAPSRV"
 GC_EMAIL_CONFIG_IMAP_PORT = "EMAIL.IMAPPORT"
 GC_EMAIL_CONFIG_UNAME = "EMAIL.UNAME"
 GC_EMAIL_CONFIG_PWORD = "EMAIL.PWORD"
-GC_EMAIL_ATTACHMENT_DIR = "./attachments"
+GC_EMAIL_ATTACHMENT_DIR = "attachments"
 
 class GC_CModule_EmailClient(GC_CModule):
 	MODULE_ID = 'email'
@@ -76,35 +77,49 @@ class GC_CModule_EmailClient(GC_CModule):
 		
 		while self.Running:
 			self.gcclient.log(GC_Utility.DEBUG, 'emailClient : Polling imap server');
-			result, data = self.mail.search(None, "(UNSEEN)")
+			self.mail.select()
+			result, data = self.mail.search(None, '(UNSEEN)')
 
 			ids = data[0] # data is a list.
 			id_list = ids.split() # ids is a space separated string
 			
 			for num in id_list:
 				result, data = self.mail.fetch(num, "(RFC822)") # fetch the email body (RFC822) for the given ID
-				typ, data = self.mail.store(num,'-FLAGS','\\Seen')
+				typ, data2 = self.mail.store(num,'+FLAGS','\\Seen')
 	
-				msg = email.message_from_string(data[0][1]) # here's the body, which is raw text of the whole email
-
+				mail = email.message_from_string(data[0][1]) # here's the body, which is raw text of the whole email
+				self.gcclient.log(GC_Utility.DEBUG, "Received email subject %s" % mail['subject'])
 				response = {}
 
 				response['cmd'] = 'receivedEmail'
-				response['msg'] = data[0][1]
+				#response['msg'] = data[0][1]
+				response['subject'] = mail['subject']
 				
-				if mail.get_content_maintype() != 'multipart':
+				# f = open('mail.txt', 'w')
+				# f.write(data[0][1])
+				# f.close()
+				
+				if mail.get_content_maintype() == 'multipart':
+					self.gcclient.log(GC_Utility.DEBUG, "Processing multipart email")
+					
 					for part in mail.walk():
 						# multipart are just containers, so we skip them
 						if part.get_content_maintype() == 'multipart':
+							self.gcclient.log(GC_Utility.DEBUG, "Nested Multipart")
 							continue
 
 						# is this part an attachment ?
-						if part.get('Content-Disposition') is None:
+						elif part.get('Content-Disposition') is None:
+							print part
+							self.gcclient.log(GC_Utility.DEBUG, "Not a Content-Disposition")
 							continue
-
+						
+						# self.gcclient.log(GC_Utility.DEBUG, "Content-Disposition: %s" % part.get('Content-Disposition'))
+						
 						filename = part.get_filename()
 						counter = 1
-
+						self.gcclient.log(GC_Utility.DEBUG, "Processing email attachment %s" % filename)
+						
 						# if there is no filename, we create one with a counter to avoid duplicates
 						if not filename:
 							filename = 'part-%03d%s' % (counter, 'bin')
@@ -113,8 +128,11 @@ class GC_CModule_EmailClient(GC_CModule):
 						att_path = os.path.join(GC_EMAIL_ATTACHMENT_DIR, filename)
 						
 						#Check if its already there
-						if os.path.isfile(att_path) :
-							GC_Utility.handleBackup(att_path)
+						if not os.path.isdir(GC_EMAIL_ATTACHMENT_DIR):
+							self.gcclient.log(GC_Utility.DEBUG, 'creating ' + GC_EMAIL_ATTACHMENT_DIR)
+							os.mkdir(GC_EMAIL_ATTACHMENT_DIR)
+						elif os.path.isfile(att_path) :
+							GC_Utility.handleBackup(att_path, self.gcclient)
 						
 						# finally write the stuff
 						fp = open(att_path, 'wb')
