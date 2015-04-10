@@ -2,12 +2,22 @@ import pika
 import time
 import sys, traceback
 
+GC_COMMS_AQMP_CERTFILE = "AQMP_CERTFILE"
+GC_COMMS_AQMP_KEYFILE  = "AQMP_KEYFILE"
+GC_COMMS_AQMP_CAFILE   = "AQMP_CAFILE"
+
 class GCClient_Comms(object):
 	def __init__(self, gc_host, userid, password):
 		self.Running = True
 		self.gc_host = gc_host
+		
+		self.aqmpcertfile = self.gc_host.readConfigItem(GC_COMMS_AQMP_CERTFILE) 
+		self.aqmpkeyfile = self.gc_host.readConfigItem(GC_COMMS_AQMP_KEYFILE) 
+		self.aqmpcafile = self.gc_host.readConfigItem(GC_COMMS_AQMP_CAFILE) 
+		
 		self.creds = pika.credentials.PlainCredentials(username=userid, password=password)
-		self.sslOptions = {'ca_certs':'client_certs/cacert.pem', 'certfile':'client_certs/test/alpha.test.bluenet.pem', 'keyfile': 'client_certs/test/alpha.test.bluenet.key.pem'}
+
+		self.sslOptions = {'ca_certs':self.aqmpcafile, 'certfile':self.aqmpcertfile, 'keyfile': self.aqmpkeyfile}
 		tries = 0
 		success = False
 		
