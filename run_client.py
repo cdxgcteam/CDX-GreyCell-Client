@@ -4,6 +4,9 @@ import time
 Running = True
 while Running:
 	try:
+		if (is_changed(GCClient)):
+			reload(GCClient)
+			
 		instance = GCClient()
 		
 		while instance.isRunning():
