@@ -15,6 +15,7 @@ import imp
 import inspect
 import subprocess
 import inspect
+import traceback, sys
 
 instance = None
 GC_AMQP_HOST = 'AMQP_HOST'
@@ -52,6 +53,9 @@ class GCClient(object):
 		
 		if self.ENABLE_COMMS:
 			# Initialize Comms Module
+			if (is_changed(GCClient_Comms.GCClient_Comms)):
+				reload(GCClient_Comms.GCClient_Comms)
+			
 			self.comms = GCClient_Comms.GCClient_Comms(gc_host = self.gc_host, userid = self.userid, password = self.password)
 
 			# Start Listening to exchanges
@@ -146,6 +150,8 @@ class GCClient(object):
 					self.gc_modules[rcvd_task[GC_Utility.GC_MODULEID]].handleTask(rcvd_task)
 				except Exception as e:
 					self.log(GC_Utility.WARN, "GCClient.logging_callback caught exception %s" % e)
+					traceback.print_exc(file=sys.stdout)
+					
 			else:
 				self.log(GC_Utility.INFO, rcvd_task[GC_Utility.GC_TASK_ID] + " create time > 5 min old ")
 		else:
@@ -173,7 +179,7 @@ class GCClient(object):
 		# 4. RecieveTime: String (YYYYMMDDZHHMMSS.SSS) <br>
 		# 5. CompleteTime: String (YYYYMMDDZHHMMSS.SSS) <br>
 		# 6. ResponseData: Key Value array, defined by module<br>
-		taskObj = []
+		taskObj = {}
 		taskObj[GC_Utility.GC_MODULEID] = moduleId
 		taskObj[GC_Utility.GC_COMPLETE_TIME] = GC_Utility.currentZuluDT()
 		taskObj[GC_Utility.GC_RESP_DATA] = respData
