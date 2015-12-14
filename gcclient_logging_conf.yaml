@@ -1,0 +1,47 @@
+# NOTE: If you are going to change log level you need to make sure the handler log level must match the loggers level!!
+logging:
+    version: 1
+
+    formatters:
+      default:
+        '()': GCClient_CustomFormatter.UTCFormatter
+        format: '%(asctime)s - %(levelname)s - %(name)s - %(funcName)s :: %(message)s'
+        datefmt: '%Y-%m-%dT%H:%M:%SZ'
+      fluent_fmt:
+        #'()': fluent.handler.FluentRecordFormatter
+        '()': GCClient_CustomFormatter.UTCFluentFormatter
+        format:  
+          level: '%(levelname)s'
+          hostname: '%(hostname)s'
+          where: '%(module)s.%(funcName)s'
+          stack_trace: '%(exc_text)s'
+        datefmt: '%Y-%m-%dT%H:%M:%SZ'
+
+    handlers:
+        console:
+            class : logging.StreamHandler
+            formatter: default
+            level: DEBUG
+            stream: ext://sys.stdout
+        fluent:
+            class: fluent.handler.FluentHandler
+            host: localhost
+            port: 24224
+            tag: test.logging
+            formatter: fluent_fmt
+            level: DEBUG
+        # null:
+        #     class: logging.NullHandler
+
+    loggers:
+        # amqp:
+        #     handlers: [null]
+        #     propagate: False
+        # conf:
+        #     handlers: [null]
+        #     propagate: False
+        'gcclient': # root logger
+            #handlers: [console, fluent]
+            handlers: [console]
+            level: DEBUG
+            propagate: False
