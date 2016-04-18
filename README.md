@@ -36,8 +36,8 @@ TaskingObj
 	cmd {execute}
 	url
 	worktime
-	
-	
+
+
 TaskId {Diagnostics}
 
 TaskId {Install}
@@ -53,3 +53,8 @@ TaskingObj
 TaskId {Quit}
 
 TaskId {Reload} # Reloads all modules
+
+
+
+- Packages Needed to Build in Linux:
+sudo apt-get install libffi-dev libssl-dev
