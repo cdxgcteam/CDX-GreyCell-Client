@@ -42,7 +42,7 @@ import copy
 LoggerName = 'gcclient.'+__name__
 logger = logging.getLogger(LoggerName)
 
-GC_VERSION = '2016_v5.1'
+GC_VERSION = '2016_v6'
 
 GC_CONFIG_FILENAME = 'gcclient.ini'
 GC_CONFIG_CATEGORY = 'DEFAULT'
@@ -436,7 +436,9 @@ class GCClient(object):
         logger.debug("Printing TaskObj: %r" % pprint.pformat(json.dumps(taskObj)))
 
         if self.ENABLE_COMMS:
-            self.comms.publish(routing_key=self.resp_key, message = json.dumps(taskObj))
+          self.comms.publish(routing_key=self.resp_key, message = json.dumps(taskObj))
+        else:
+          logger.info("Result: %r" % pprint.pformat(json.dumps(taskObj)))
 
 
     def sendOneOffResult(self, moduleId, respData):
@@ -517,17 +519,13 @@ class GCClient(object):
                 logger.debug('file: %s [%s]', file, file_list[file])
 
         diag_msg['Files'] = file_list
-        try:
-            if (platform.system() == 'Windows'):
-                diag_msg['processList'] = subprocess.check_output('tasklist')
-            elif platform.system() == 'Linux' or platform.system() == 'Darwin':
-                diag_msg['processList'] = subprocess.check_output(['ps','-l'])
-            else:
-                diag_msg['processList'] = "Error retrieving process list on platform %s" % platform.system()
-        except:
-             logger.warn('Caught exception generating task list')
-             diag_msg['processList'] = "Caught exception generating task list"
-             
+        if (platform.system() == 'Windows'):
+            diag_msg['processList'] = subprocess.check_output('tasklist')
+        elif platform.system() == 'Linux' or platform.system() == 'Darwin':
+            diag_msg['processList'] = subprocess.check_output(['ps','-l'])
+        else:
+            diag_msg['processList'] = "Error retrieving process list on platform %s" % platform.system()
+
         if isinstance(diag_msg['processList'], bytes):
             diag_msg['processList'] = diag_msg['processList'].decode('utf-8')
 
