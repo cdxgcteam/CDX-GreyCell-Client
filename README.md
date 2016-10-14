@@ -1,11 +1,26 @@
 # CDX-GreyCell-Client<br>
-2015 Grey Cell Client Code<br>
+2017 Grey Cell Client Code<br>
 Required components:<br>
-Python 2.7.4<br>
-RabbitMQ pika<br>
+Python 3.2.5 or greater<br>
+RabbitMQ pika 0.10<br>
+Selenium 3.0<br>
+logger 1.4
+
 <br>
-Currently tested under windows 8, w/ Pika 0.9.14<br>
+OS's Supported:
+<ul>
+<li> Windows 7
+<li> Windows 10
+<li> Ubuntu 16.04
+<li> Centos 7<br>
 <br>
+
+<br>
+Browsers supported:
+<ul>
+<li>Firefox 49
+<li>Chrome 53
+</ul>
 
 ClientID == SchoolName_Hostname
 SpecialNames:
@@ -53,8 +68,3 @@ TaskingObj
 TaskId {Quit}
 
 TaskId {Reload} # Reloads all modules
-
-
-
-- Packages Needed to Build in Linux:
-sudo apt-get install libffi-dev libssl-dev
