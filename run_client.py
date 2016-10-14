@@ -130,14 +130,20 @@ def main(argv):
             
         taskObj[GC_Utility.GC_MODULEID] = 'selenium'
         taskObj[GC_Utility.GC_CMD_DATA]['cmd'] = 'execute_url'
-        taskObj[GC_Utility.GC_CMD_DATA]['timer'] = 20
-        taskObj[GC_Utility.GC_CMD_DATA]['url'] = 'http://www.cnn.com'
+        taskObj[GC_Utility.GC_CMD_DATA]['timer'] = 10
         
         #queue_object.put(['ch','method','properties',json.dumps(taskObj).encode()])
-        
-        instance.logging_callback('ch','method','properties',json.dumps(taskObj).encode()) #(queue_object)
-        
-        time.sleep(60)
+        url_list = ['http://www.cnn.com',
+                    'https://www.google.com',
+                    'http://www.arstechnica.com',
+                    'http://www.hackaday.com']
+                    
+        for url in url_list: 
+          taskObj[GC_Utility.GC_CMD_DATA]['url'] = url
+          instance.logging_callback('ch','method','properties',json.dumps(taskObj).encode())
+          time.sleep(5)
+          
+        time.sleep(180)
         instance.quit()
 # Execute Main:
 if __name__ == "__main__":
