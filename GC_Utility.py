@@ -37,6 +37,7 @@ GC_MOD_DEBUG = 'debug'
 GC_DATESTR_FORMAT = '%Y%m%dT%H%M%S.%f'
 GC_LOG_DATETIME = 'datetime'
 GC_LOG_MSG = 'msg'
+GC_VERSION = 'version'
 
 """
 Function: currentZuluDT

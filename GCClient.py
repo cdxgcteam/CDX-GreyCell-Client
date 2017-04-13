@@ -42,7 +42,7 @@ import copy
 LoggerName = 'gcclient.'+__name__
 logger = logging.getLogger(LoggerName)
 
-GC_VERSION = '2016_v6'
+GC_VERSION = '2017_patch8'
 
 GC_CONFIG_FILENAME = 'gcclient.ini'
 GC_CONFIG_CATEGORY = 'DEFAULT'
@@ -107,7 +107,7 @@ class GCClient(object):
         logger.debug('Init Vars :: gc_amqp_sslon: %s', gc_amqp_sslon)
 
         # Set global version:
-        self.version = version
+        self.version = GC_VERSION
 
         # Set client id, if specified
         self.clientid = client_id
@@ -145,22 +145,12 @@ class GCClient(object):
                                                        mon_routing_key=routing_keys,
                                                        mon_callback=self.logging_callback)
 
-            # Start Listening to exchanges
-            # t = threading.Thread(name=GC_ALL_TASKS,
-            #                      target=self.comms.monitor,
-            #                      args=(self.task_exchange, [GC_ALL_TASKS, self.school_name + GC_TASK_ROUTINGKEY,  self.uuid + GC_TASK_ROUTINGKEY], self.logging_callback))
-
-            # Start Listening to exchanges
-            # t = threading.Thread(name=GC_ALL_TASKS,
-            #                      target=self.comms.monitor,
-            #                      args=(self.task_exchange, routing_keys, self.logging_callback))
-            # t.start()
-            # self.gc_threads.append(t)
-
+            # Start seperate thread for the AMQP blocking connection
             t = threading.Thread(name=GC_ALL_TASKS,
                                  target=self.comms.initiate_connection)
             t.start()
             self.gc_threads.append(t)
+
         # Load all CModules and built-in functions
         self.loadModules()
 
@@ -233,6 +223,7 @@ class GCClient(object):
                 self.clientid = config.get(GC_CONFIG_CATEGORY, GC_CLIENTID)
             else:
                 self.clientid = socket.gethostname()
+
         logger.info('clientid: %s', self.clientid)
 
         # Set UUID:
@@ -254,7 +245,7 @@ class GCClient(object):
         config.readfp(config_file)
         c_item = config.get(GC_CONFIG_CATEGORY, configItem)
         config_file.close()
-        
+
         return c_item
 
     """
@@ -330,7 +321,7 @@ class GCClient(object):
                         logger.debug('Loading GC_CModule: ' + obj.__name__)
                         m = obj(self)
                         self.gc_modules[m.getModuleId()] = m
-                        
+
                         logger.info('Loaded Module: ' + m.getModuleId())
                     except AssertionError:
                         logger.warn('Failed to load module ' + name, exc_info=True)
@@ -366,9 +357,6 @@ class GCClient(object):
     """
     def logging_callback(self, ch, method, properties, body):
     #@defer.inlineCallbacks
-    #def logging_callback(self, queue_object):
-        #logger.debug(queue_object)
-        #ch,method,properties,body = yield queue_object.get()
 
         # Show Raw Body:
         logger.debug("Raw body: %r" % body)
@@ -427,6 +415,7 @@ class GCClient(object):
         # Set assemble the task and response objects.
         taskObj[GC_Utility.GC_COMPLETE_TIME] = GC_Utility.currentZuluDT()
         taskObj[GC_Utility.GC_RESP_DATA] = respData
+        taskObj[GC_Utility.GC_VERSION] = self.version
 
         # delete unnecessary command data before returning the results
         if GC_Utility.GC_CMD_DATA in taskObj:
@@ -451,6 +440,7 @@ class GCClient(object):
         taskObj[GC_Utility.GC_MODULEID] = moduleId
         taskObj[GC_Utility.GC_COMPLETE_TIME] = GC_Utility.currentZuluDT()
         taskObj[GC_Utility.GC_RESP_DATA] = respData
+        taskObj[GC_Utility.GC_VERSION] = self.version
 
         logger.debug("Printing TaskObj: %r" % pprint.pformat(json.dumps(taskObj)))
 
@@ -466,6 +456,7 @@ class GCClient(object):
         log_msg[GC_Utility.GC_LOG_DATETIME] = GC_Utility.currentZuluDT()
         log_msg[GC_Utility.GC_CLIENTID] = self.uuid
         log_msg[GC_Utility.GC_LOG_MSG] = msg
+        log_msg[GC_Utility.GC_VERSION] = self.version
 
         curframe = inspect.currentframe()
         calframe = inspect.getouterframes(curframe, 2)
@@ -547,7 +538,7 @@ class GCClient(object):
                    m.quit()
                 except:
                    logger.debug('Caught Exception while quitting ' + m.getModuleId())
-                
+
                 del m
 
         # Turn off AMQP
