@@ -28,6 +28,8 @@ from selenium import webdriver
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
+from selenium.common.exceptions import WebDriverException
+from selenium.common.exceptions import TimeoutException
 
 import subprocess
 from threading import Thread
@@ -38,22 +40,23 @@ import re
 import string
 import logging
 
+
 from html.parser import HTMLParser
-
-# create a subclass to hash links
-class CDXHTMLParser(HTMLParser):
-    LinkString = ""
-
-    def handle_starttag(self, tag, attrs):
-        if tag == 'a':
-            for name,value in attrs:
-                if(name == 'href'):
-                    self.LinkString = self.LinkString + value
+from html.parser import HTMLParseError
 
 # Setup Logging:
 LoggerName = 'gcclient.module.'+__name__
 logger = logging.getLogger(LoggerName)
 logger.setLevel(logging.DEBUG)
+
+class CDXHTMLParser(HTMLParser):
+  LinkString = ""
+
+  def handle_starttag(self, tag, attrs):
+    if (tag == 'a'):
+      for name, value in attrs:
+        if (name == 'href'):
+          self.LinkString = self.LinkString + value
 
 # Frequency in seconds for the queue
 GC_SELENIUM_POLL_INTERVAL = 5
@@ -66,8 +69,8 @@ GC_SELENIUM_SAVE_LOCATION = 'attachments_2'
 GC_SELENIUM_EXECUTE_URL = 'execute_url'
 GC_SELENIUM_DOWNLOAD_AND_EXEC = 'dl_execute'
 
-# known file types to save, this will be used to prevent the save/open dialog in
-# FF mp3 pdf  doc wmv tgz mov xbm xinc xls ppt eps exe rpm mpg bz2
+# known file types to save, this will be used to prevent the save/open dialog in FF
+#mp3 pdf  doc wmv tgz mov xbm xinc xls ppt eps exe rpm mpg bz2
 GC_SELENIUM_SAVE_FILETYPES = ';'.join(['application/octet-stream',
                     'application/zip',
                     'application/x-zip',
@@ -109,7 +112,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
     self.killPID()
 
     # Start up the browser
-    self.startFF()
+    self.startFF(True)
 
     # Semaphore
     self.Running = True
@@ -123,27 +126,47 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 
   """
   Function: startFF
-  Desription: Starts FF with a profile to automatically download known file types. Records the process id of the FF browser to
+  Desription: Starts FF with a profile to automatically download known file types. Records the process id of the FF browser too
+
+  The marionette driver currently has a bug that does not allow untrusted certificates to be bypess, so
+  the boolean argument will allow using the older driver in this instance.
   """
-  def startFF(self):
+  def startFF(self, marionette):
     self.loadCount = 0
 
     try:
       # Enable saving files
       fp = webdriver.FirefoxProfile()
+      # set the location to save files to
+      if (platform.system() == 'Windows'):
+          path = os.getcwd() + '\\modules\\ff_profile'
+      elif (platform.system() == 'Linux'):
+          path = os.getcwd() + '/modules/ff_profile'
+      #Use the already existing profile that has the certificate stored in it
+      if os.path.exists(path):
+          fp = webdriver.FirefoxProfile(path)
+      else:
+          logger.warn("Firefox profile not found at %s" % path)
 
       fp.set_preference("browser.download.folderList",2)
       fp.set_preference("browser.download.manager.showWhenStarting",False)
+      fp.accept_untrusted_certs = True
 
       firefox_capabilities = DesiredCapabilities.FIREFOX
-      firefox_capabilities["marionette"] = True
+      firefox_capabilities["marionette"] = marionette
+      firefox_capabilities["acceptInsecureCerts"] = True
+      firefox_capabilities["acceptSslCerts"] = True
 
       # set the location to save files to
       if (platform.system() == 'Windows'):
         fp.set_preference("browser.download.dir", os.getcwd() + '\\' + GC_SELENIUM_SAVE_LOCATION)
+        #firefox_capabilities['binary'] = 'C:\\Program Files (x86)\\Firefox Developer Edition\\firefox.exe'
+        #firefox_capabilities["binary"] = "C:\\Program Files\\Mozilla Firefox\\firefox.exe"
       elif (platform.system() == 'Linux'):
         fp.set_preference("browser.download.dir", os.getcwd() + '/' + GC_SELENIUM_SAVE_LOCATION)
-      #  firefox_capabilities["binary"] = "/usr/bin/firefox"
+        firefox_capabilities["binary"] = "/usr/bin/firefox"
+
+      fp.accept_untrusted_certs = True
 
       logger.debug('Selenium Save File Types: %s', GC_SELENIUM_SAVE_FILETYPES)
       fp.set_preference("browser.helperApps.neverAsk.saveToDisk", GC_SELENIUM_SAVE_FILETYPES)
@@ -154,6 +177,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 
       # Initialize the selinium web driver
       self.driver = webdriver.Firefox(firefox_profile=fp, capabilities=firefox_capabilities)
+      self.driver.set_page_load_timeout(30)
       #self.driver = webdriver.Chrome()
 
       # Since Selenium 3.0, can no longer get the process pid programatically.
@@ -195,11 +219,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
           logger.debug(taskList)
 
       elif (my_os == 'Linux'):
-        taskList = subprocess.check_output("ps | grep firefox | cut -d ' ' -f1", shell=True).decode('utf-8').strip().split("\n")
-        for task in taskList:
-          pids.append(task)
-
-        logger.debug(taskList)
+        taskList = subprocess.check_output("ps -p %s" % previous_pid, shell=True).decode('utf-8')
 
       else:
         logger.warn('Unable to kill PID %s on platform %s' % (previous_pid, my_os), exc_info=True)
@@ -226,7 +246,7 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
 
       # since some versions of FF spawn multiple processes, the pid file may be a comma seperated list
       f = open(GC_SELENIUM_PID_FILE, 'r')
-      previous_pids = f.read().split(',')
+      previous_pids = f.read().split()
       f.close()
 
       for pid in previous_pids:
@@ -294,6 +314,60 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
       time.sleep(GC_SELENIUM_POLL_INTERVAL)
 
   """
+  Function: loadAndParse
+  Description: Loads the webpage requested, parses the links and stores their MD5 hash
+  """
+  def loadAndParse(self, url, response, gccommand, timer):
+    # Save off current title. Will look for a change in title after the page load.
+    # increment the load counter
+    self.loadCount = self.loadCount + 1
+
+    # if over 200 urls have been loaded, restart the browser. This forces cleanup.
+    if (self.loadCount > 100):
+        self.driver.quit()
+        self.killPID()
+        self.startFF(True)
+
+    oldtitle = self.driver.title
+    logger.info('executeCmd : [%s loading url %s]' % (gccommand[GC_Utility.GC_MODULEID], url))
+
+    try:
+        self.driver.get(url)
+    except TimeoutException as e:
+        logger.info('timeout for url %s' % url)
+
+    #self.gcclient.log(GC_Utility.DEBUG, 'executeCmd : [%s pausing for %s sec]' % (gccommand[GC_Utility.GC_MODULEID], timer))
+    logger.info('executeCmd : [%s pausing for %s sec]' % (gccommand[GC_Utility.GC_MODULEID], timer))
+
+    # Sleep for defined amount of seconds
+    time.sleep(timer)
+
+    # If the page title doesn't change, something went wrong
+    if (self.driver.title == oldtitle):
+        logger.warn('page title doesn\'t change, something went wrong')
+        #print "FAILURE!!!"
+
+    """ Gather scoring evidence """
+    # Pulling the title of the page
+    response['Title'] = self.driver.title
+
+    # Hashing the whole page
+    response['page_md5'] = hashlib.md5(self.driver.page_source.encode("utf-8")).hexdigest()
+
+    # Hashing every link on the page
+    try:
+        parser = CDXHTMLParser()
+        parser.feed(self.driver.page_source)
+
+        response['links_md5'] = hashlib.md5(parser.LinkString.encode("utf-8")).hexdigest()
+    except Exception as h:
+        response['links_md5'] = 'Error'
+        pass
+
+    # Reset the browser to a blank page
+    self.driver.get('about:blank')
+
+  """
   Function: execTask
   Description: Actually execute selenium tasks
 
@@ -318,50 +392,28 @@ class GC_CModule_SeleniumTaskModule(GC_CModule):
     # Initialize response object
     response = {}
     response['startTime'] = startTime
+    response['browserVersion'] = self.driver.capabilities['browserVersion']
 
     logger.info('excuteCmd : [%s:%s(%s)]' % (gccommand[GC_Utility.GC_MODULEID], cmd, url))
 
-    # Save off current title. Will look for a change in title after the page load.
-    oldtitle = self.driver.title
-
     # Command the browser to load the URL
-    self.driver.get(url)
+    try:
+        self.loadAndParse(url, response, gccommand, timer)
 
-    # increment the load counter
-    self.loadCount = self.loadCount + 1
-
-    # if over 200 urls have been loaded, restart the browser. This forces cleanup.
-    if (self.loadCount > 100):
-      self.driver.quit()
-      self.killPID()
-      self.startFF()
-
-    #self.gcclient.log(GC_Utility.DEBUG, 'executeCmd : [%s pausing for %s sec]' % (gccommand[GC_Utility.GC_MODULEID], timer))
-    logger.debug('executeCmd : [%s pausing for %s sec]' % (gccommand[GC_Utility.GC_MODULEID], timer))
-
-    # Sleep for defined amount of seconds
-    time.sleep(timer)
-
-    # If the page title doesn't change, something went wrong
-    if (self.driver.title == oldtitle):
-      logger.warn('page title doesn\'t change, something went wrong')
-      #print "FAILURE!!!"
-
-    """ Gather scoring evidence """
-    # Pulling the title of the page
-    response['Title'] = self.driver.title
-
-    # Hashing the whole page
-    response['page_md5'] = hashlib.md5(self.driver.page_source.encode("utf-8")).hexdigest()
-
-    # Hashing every link on the page
-    parser = CDXHTMLParser()
-    parser.feed(self.driver.page_source)
-
-    response['links_md5'] = hashlib.md5(parser.LinkString.encode("utf-8")).hexdigest()
-
-    # Reset the browser to a blank page
-    self.driver.get('about:blank')
+    except WebDriverException as e:
+        logger.warn("Caught an WebDriverException in Selenium.")
+        response['Title'] = 'Error'
+        response['page_md5'] = 'Error'
+        response['links_md5'] = 'Error'
+        response['error'] = 'WebDriverException'
+        response['exception'] = str(e.__str__)
+    except Exception as e:
+        logger.warn("Caught an Generic Exception in Selenium.")
+        response['Title'] = 'Error'
+        response['page_md5'] = 'Error'
+        response['links_md5'] = 'Error'
+        response['error'] = 'Generic Exception'
+        response['exception'] = str(e.__str__)
 
     logger.debug('sendResult :[%s:%s] ' % (gccommand[GC_Utility.GC_MODULEID], gccommand[GC_Utility.GC_TASKREF]))
     self.gcclient.sendResult(gccommand, response)
