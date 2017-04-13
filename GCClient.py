@@ -119,8 +119,8 @@ class GCClient(object):
         self.generate_diagnostics()
 
         self.ENABLE_COMMS = enable_comms
-        if self.ENABLE_COMMS:
 
+        if self.ENABLE_COMMS:
             cur_amqp_host = self.gc_host
             if gc_amqp_host is not None:
                 cur_amqp_host = gc_amqp_host
@@ -502,6 +502,12 @@ class GCClient(object):
         logger.debug('uname: %s', diag_msg['uname'])
 
         file_list = {}
+        certfile = './modules/ff_profile/cert8.db'
+        hashme = open(certfile, 'rb')
+        file_list[certfile] = hashlib.md5(hashme.read()).hexdigest()
+        hashme.close()
+        logger.debug('file: %s [%s]', certfile, file_list[certfile])
+
         for file in os.listdir("."):
             if os.path.isfile(file):
                 hashme = open(file, 'rb')
