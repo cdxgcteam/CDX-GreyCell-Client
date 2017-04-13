@@ -36,7 +36,6 @@ class GCClient_Comms(object):
         logger.debug("mon_exchange: %s" % mon_exchange)
         logger.debug("mon_type: %s" % mon_type)
         logger.debug("mon_routing_key: %s" % mon_routing_key)
-        #logger.debug("mon_callback: %o" % mon_callback)
 
         self.response_exchange = resp_exchange
         self.response_type = resp_type
@@ -48,46 +47,47 @@ class GCClient_Comms(object):
         self.creds = pika.credentials.PlainCredentials(username=userid, password=password)
 
         self.sslOptions = {'ca_certs':cafile, 'certfile':certfile, 'keyfile': keyfile}
-        
+
         self.parameters = pika.ConnectionParameters(host=self.gc_host,
                                              credentials=self.creds,
                                              heartbeat_interval=30,
                                              port=self.gc_port,
                                              ssl=False,
                                              ssl_options=self.sslOptions)
-	
-        #self.initiate_connection()
 
     def publish(self, routing_key, message):
         logger.info("Attempting to publish to " + self.gc_host)
         try:
-            #self.resp_channel.exchange_declare(exchange=exchange_name, type=type)
+            self.resp_connection = pika.BlockingConnection(self.parameters)
+            self.resp_channel = self.resp_connection.channel()
             self.resp_channel.basic_publish(exchange=self.response_exchange,
                                   routing_key=routing_key,
                                   body=message)
 
-            logger.debug("[x] Sent %r:%r on exchange %r" % (routing_key, message, self.response_exchange))
+            logger.info("[x] Sent %r:%r on exchange %r" % (routing_key, message, self.response_exchange))
+            self.resp_connection.close()
         except:
             logger.warn("Connection Error", exc_info=False)
             tries = 0
             success = False
-        
+
             logger.info('reinitializing publish connection')
-            
+
             while (not success) and (tries < 5) and (self.Running == True):
                 try:
                     logger.info("Creating response connection and channel")
-                    self.resp_connection = pika.BlockingConnection(self.parameters)          
+                    self.resp_connection = pika.BlockingConnection(self.parameters)
                     self.resp_channel = self.resp_connection.channel()
                     self.resp_channel.basic_publish(exchange=self.response_exchange,
                                   routing_key=routing_key,
                                   body=message)
 
                     logger.debug("[x] Sent %r:%r on exchange %r" % (routing_key, message, self.response_exchange))
-                    success = True        
+                    self.resp_connection.close()
+                    success = True
                 except Exception as e:
                     logger.debug(e)
-                    logger.warn("Connection Error", exc_info=True)
+                    logger.warn("Connection Error while publishing", exc_info=True)
                     tries = tries + 1
                     time.sleep(5)
 
@@ -95,38 +95,26 @@ class GCClient_Comms(object):
         while (self.Running == True):
             tries = 0
             success = False
-	
+
             logger.debug('entered initiate_connection')
+
+            tries = 0
+            success = False
+            logger.debug('parameters: %r' % pprint.pformat(self.parameters))
+
             while (not success) and (tries < 5) and (self.Running == True):
                 try:
-                    logger.info("Creating response connection and channel")
-                    self.resp_connection = pika.BlockingConnection(self.parameters)          
-                    self.resp_channel = self.resp_connection.channel()
-                    success = True        
+                    logger.info("Creating monitor connection and channel")
+                    self.monitor_connection = pika.BlockingConnection(self.parameters)
+
+                    self.monitor_channel = self.monitor_connection.channel()
+                    success=True
                 except Exception as e:
                     logger.debug(e)
                     logger.warn("Connection Error", exc_info=True)
                     tries = tries + 1
                     time.sleep(5)
-            
-            if (success):
-                tries = 0
-                success = False
-                logger.debug('parameters: %r' % pprint.pformat(self.parameters))
-            
-                while (not success) and (tries < 5) and (self.Running == True):
-                    try:
-                        logger.info("Creating monitor connection and channel")
-                        self.monitor_connection = pika.BlockingConnection(self.parameters)          
-                
-                        self.monitor_channel = self.monitor_connection.channel()
-                        success=True
-                    except Exception as e:
-                        logger.debug(e)
-                        logger.warn("Connection Error", exc_info=True)
-                        tries = tries + 1
-                        time.sleep(5)
-                        
+
             if (success):
                 self.monitor()
 
@@ -186,32 +174,32 @@ class GCClient_Comms(object):
         if (self.Running):
             self.Running = False
             self.monitor_connection.close()
-            self.resp_connection.close()
+            #self.resp_connection.close()
 
     def monitor(self):
         tries = 0
         success = False
         logger.debug('parameters: %r' % pprint.pformat(self.parameters))
-        
+
         while (not success) and (tries < 5) and (self.Running == True):
             try:
                 logger.info("Listening on topic " + self.monitor_exchange + " with")
                 self.monitor_channel.exchange_declare(exchange=self.monitor_exchange, type='topic')
-        
+
                 result = self.monitor_channel.queue_declare(exclusive=True)
                 queue_name = result.method.queue
-                
+
                 for key in self.monitor_routing_key:
                     logger.info("Binding to routing key %s" % key)
                     self.monitor_channel.queue_bind(exchange=self.monitor_exchange,
                                         queue=queue_name,
                                         routing_key=key)
-        
+
                 logger.info("basic_consume queue: %s" % queue_name)
                 self.monitor_channel.basic_consume(self.monitor_callback,
                                         queue=queue_name,
                                         no_ack=True)
-        
+
                 logger.info("consumer starting...")
                 self.monitor_channel.start_consuming()
                 success=True
